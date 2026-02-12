@@ -1,0 +1,9 @@
+{
+  "name": "RAIHAN KHAN ONLINE - Futuristic AI Blog",
+  "description": "A high-end, futuristic blogging platform featuring AI-powered news generation, content suggestions, multilingual support, and deep analytics.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
