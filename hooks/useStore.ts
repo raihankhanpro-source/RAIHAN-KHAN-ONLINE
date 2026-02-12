@@ -10,9 +10,9 @@ const DEFAULT_CONFIG: SiteConfig = {
   neonColor: '#00f3ff',
   navItems: [
     { id: '1', name: { en: 'Home', bn: 'হোম', ar: 'الرئيسية' }, path: 'home', isCustom: false },
-    { id: '2', name: { en: 'Saudi Helper', bn: 'সৌদি হেল্পার', ar: 'مساعد السعودية' }, path: 'saudi-helper', isCustom: false },
-    { id: '3', name: { en: 'AI Tools', bn: 'সেরা এআই টুলস', ar: 'أدوات الذكاء الاصطناعي' }, path: 'ai-tools', isCustom: false },
-    { id: '4', name: { en: 'AI News', bn: 'এআই নিউজ', ar: 'أخبار الذكاء الاصطناعي' }, path: 'news', isCustom: false }
+    { id: '2', name: { en: 'Saudi Helper', bn: 'সৌদি হেল্পার', ar: 'মساعد السعودية' }, path: 'saudi-helper', isCustom: false },
+    { id: '3', name: { en: 'AI Tools', bn: 'সেরা এআই টুলস', ar: 'أদوات الذকاء الاصطناعي' }, path: 'ai-tools', isCustom: false },
+    { id: '4', name: { en: 'AI News', bn: 'এআই নিউজ', ar: 'أخبار الذকاء الاصطناعي' }, path: 'news', isCustom: false }
   ]
 };
 
@@ -70,16 +70,17 @@ export function useStore() {
   const updateConfig = (newConfig: Partial<SiteConfig>) => setSiteConfig(prev => ({ ...prev, ...newConfig }));
   
   const addPost = (post: Post) => setPosts(prev => [post, ...prev]);
+  const updatePost = (post: Post) => setPosts(prev => prev.map(p => p.id === post.id ? post : p));
   const deletePost = (id: string) => setPosts(prev => prev.filter(p => p.id !== id));
   
   const addUser = (user: User) => setUsers(prev => [...prev, user]);
+  const updateUser = (user: User) => setUsers(prev => prev.map(u => u.id === user.id ? user : u));
   const deleteUser = (id: string) => setUsers(prev => prev.filter(u => u.id !== id));
 
   const incrementView = useCallback((postId: string) => {
     setPosts(prev => prev.map(p => p.id === postId ? { ...p, views: p.views + 1 } : p));
   }, []);
 
-  // Fix: Added toggleLike function to manage user likes and update post counts accordingly
   const toggleLike = useCallback((postId: string) => {
     if (!currentUser) return;
     
@@ -98,10 +99,10 @@ export function useStore() {
   }, [currentUser]);
 
   return {
-    posts, addPost, deletePost,
+    posts, addPost, updatePost, deletePost,
     comments, setComments,
     currentUser, setCurrentUser,
-    users, addUser, deleteUser,
+    users, addUser, updateUser, deleteUser,
     siteConfig, updateConfig,
     lang, setLang,
     incrementView,

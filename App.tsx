@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from './hooks/useStore';
 import { Post, Comment, User, Language, AISuggestion } from './types';
@@ -7,6 +8,7 @@ import PostCard from './components/PostCard';
 import CommentSection from './components/CommentSection';
 import AdminAnalytics from './components/AdminAnalytics';
 import AdminNewsGenerator from './components/AdminNewsGenerator';
+import AdminUserManagement from './components/AdminUserManagement';
 import AIChatbot from './components/AIChatbot';
 import AIImageGenerator from './components/AIImageGenerator';
 import ScrollToTop from './components/ScrollToTop';
@@ -28,26 +30,26 @@ import {
   ExternalLink, Facebook, Instagram, Send, Bot, Info, Globe, ArrowRight,
   HeartHandshake, BookOpen, ShieldCheck, MapPin, Key, UserPlus, MessageSquare,
   CheckCircle, XCircle, History, Zap, Bell, Check, Lightbulb, Loader2,
-  Twitter, Linkedin, MessageCircle, Link as LinkIcon, FilePlus, UserCircle
+  Twitter, Linkedin, MessageCircle, Link as LinkIcon, FilePlus, UserCircle, Users
 } from 'lucide-react';
 
 const App: React.FC = () => {
   const { 
-    posts, addPost, deletePost,
+    posts, addPost, updatePost, deletePost,
     comments, setComments,
     currentUser, setCurrentUser,
-    users, addUser, deleteUser,
+    users, addUser, updateUser, deleteUser,
     siteConfig,
     lang, setLang,
     incrementView, toggleLike
   } = useStore();
 
   const [path, setPath] = useState('home');
+  const [adminTab, setAdminTab] = useState<'analytics' | 'news' | 'users'>('analytics');
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -199,6 +201,26 @@ const App: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleSavePost = (post: Post) => {
+    if (editingPost) {
+      updatePost(post);
+    } else {
+      addPost(post);
+    }
+    setIsEditorOpen(false);
+    setEditingPost(null);
+  };
+
+  const openNewPostEditor = () => {
+    setEditingPost(null);
+    setIsEditorOpen(true);
+  };
+
+  const openEditPostEditor = (post: Post) => {
+    setEditingPost(post);
+    setIsEditorOpen(true);
+  };
+
   const renderSaudiHelper = () => (
     <div className="max-w-[1600px] mx-auto px-[5vw] py-24">
       <header className="mb-16 text-center reveal-item">
@@ -239,19 +261,26 @@ const App: React.FC = () => {
 
   const renderPostDetail = () => {
     if (!selectedPost) return renderHome();
-    const shareUrl = window.location.origin + '?post=' + selectedPost.id;
-    const shareTitle = selectedPost.title[lang];
     const isLiked = (currentUser?.likedPosts || []).includes(selectedPost.id);
+    const isAdmin = currentUser?.role === 'admin';
 
     return (
       <article className="max-w-4xl mx-auto px-[5vw] py-24">
-        <nav className="mb-12">
+        <nav className="mb-12 flex justify-between items-center">
           <button 
             onClick={() => setPath('home')}
             className="flex items-center gap-2 text-cyan-400 font-orbitron text-xs hover:translate-x-[-4px] transition-transform"
           >
             <ArrowRight className="w-4 h-4 rotate-180" /> BACK TO TERMINAL
           </button>
+          {isAdmin && (
+            <button 
+              onClick={() => openEditPostEditor(selectedPost)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-orbitron hover:bg-white/10"
+            >
+              <Edit3 className="w-4 h-4" /> EDIT POST
+            </button>
+          )}
         </nav>
         
         <header className="space-y-8 mb-12">
@@ -280,7 +309,7 @@ const App: React.FC = () => {
           </div>
         </header>
         
-        <div className="prose prose-invert max-w-none text-slate-300 text-lg md:text-xl leading-loose space-y-8 mb-20">
+        <div className="prose prose-invert max-w-none text-slate-300 text-lg md:text-xl leading-loose space-y-8 mb-20 whitespace-pre-wrap">
           {selectedPost.content[lang]}
         </div>
 
@@ -324,15 +353,25 @@ const App: React.FC = () => {
             Navigating the neon frontiers of AI, Design, and Future Tech.
           </p>
         </div>
-        <div className="relative group w-full md:w-auto">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
-          <input 
-            type="text" 
-            placeholder={t.search}
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="glass-panel rounded-2xl pl-12 pr-6 py-5 text-sm focus:outline-none focus:border-cyan-500/50 w-full md:min-w-[450px]"
-          />
+        <div className="flex flex-col gap-4">
+          <div className="relative group w-full md:w-auto">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+            <input 
+              type="text" 
+              placeholder={t.search}
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="glass-panel rounded-2xl pl-12 pr-6 py-5 text-sm focus:outline-none focus:border-cyan-500/50 w-full md:min-w-[450px]"
+            />
+          </div>
+          {currentUser?.role === 'admin' && (
+            <button 
+              onClick={openNewPostEditor}
+              className="flex items-center justify-center gap-2 px-6 py-4 rounded-2xl bg-cyan-500 text-black font-orbitron font-black uppercase tracking-widest hover:scale-105 transition-all shadow-[0_0_20px_rgba(0,243,255,0.4)]"
+            >
+              <Plus className="w-5 h-5" /> NEW TRANSMISSION
+            </button>
+          )}
         </div>
       </header>
 
@@ -374,6 +413,69 @@ const App: React.FC = () => {
       </main>
     </div>
   );
+
+  const renderAdminPanel = () => {
+    if (currentUser?.role !== 'admin' && currentUser?.role !== 'editor') {
+        return <div className="p-20 text-center font-orbitron text-red-500">ACCESS DENIED: PROTOCOL BREACH DETECTED</div>;
+    }
+
+    return (
+      <div className="max-w-[1400px] mx-auto px-[5vw] py-24">
+        <header className="mb-12">
+            <h1 className="text-4xl md:text-6xl font-orbitron font-black mb-6">CENTRAL <span className="neon-text-cyan">COMMAND</span></h1>
+            <div className="flex flex-wrap gap-4 p-2 bg-white/5 rounded-2xl border border-white/10 w-fit">
+                {[
+                  { id: 'analytics', label: 'ANALYTICS', icon: <BarChart3 className="w-4 h-4" /> },
+                  { id: 'news', label: 'VIRAL NEWS', icon: <Zap className="w-4 h-4" /> },
+                  { id: 'users', label: 'USER MGMT', icon: <Users className="w-4 h-4" /> }
+                ].map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setAdminTab(tab.id as any)}
+                      className={`px-6 py-3 rounded-xl flex items-center gap-3 font-orbitron text-[10px] font-black uppercase transition-all ${adminTab === tab.id ? 'bg-cyan-500 text-black shadow-[0_0_20px_rgba(0,243,255,0.4)]' : 'text-slate-500 hover:text-white'}`}
+                    >
+                      {tab.icon} {tab.label}
+                    </button>
+                ))}
+            </div>
+        </header>
+
+        <div className="reveal-item">
+            {adminTab === 'analytics' && <AdminAnalytics posts={posts} comments={comments} lang={lang} />}
+            {adminTab === 'news' && (
+                <AdminNewsGenerator lang={lang} onAddNewsAsPost={(news) => {
+                    const newPost: Post = {
+                        id: Math.random().toString(),
+                        title: { en: news.headline, bn: news.headline, ar: news.headline },
+                        summary: { en: news.summary, bn: news.summary, ar: news.summary },
+                        content: { en: news.summary, bn: news.summary, ar: news.summary },
+                        author: 'AI Reporter',
+                        date: new Date().toISOString(),
+                        image: `https://picsum.photos/seed/${Math.random()}/1200/600`,
+                        category: 'AI',
+                        priority: 5,
+                        tags: ['AI', 'News'],
+                        views: 0,
+                        likes: 0,
+                        seo: { title: news.headline, description: news.summary, keywords: [], robots: 'index, follow' }
+                    };
+                    addPost(newPost);
+                    setAdminTab('analytics');
+                }} />
+            )}
+            {adminTab === 'users' && (
+                <AdminUserManagement 
+                    users={users} 
+                    lang={lang} 
+                    currentUser={currentUser} 
+                    onUpdateUser={updateUser} 
+                    onDeleteUser={deleteUser} 
+                />
+            )}
+        </div>
+      </div>
+    );
+  };
 
   const renderContent = () => {
     switch (path) {
@@ -419,6 +521,7 @@ const App: React.FC = () => {
             }} />
           </div>
         );
+      case 'admin': return renderAdminPanel();
       case 'post-detail': return renderPostDetail();
       case 'login': return (
         <div className="min-h-[80vh] flex items-center justify-center px-[5vw]">
@@ -452,6 +555,16 @@ const App: React.FC = () => {
     <div className={`min-h-screen text-slate-100 ${lang === 'ar' ? 'rtl' : 'ltr'}`}>
       <Navbar lang={lang} setLang={setLang} user={currentUser} currentPath={path} setPath={setPath} onLogout={handleLogout} config={siteConfig} />
       <main className="relative z-10 pt-16 min-h-screen">{renderContent()}</main>
+      
+      {isEditorOpen && (
+        <PostEditor 
+          lang={lang}
+          onSave={handleSavePost}
+          onCancel={() => setIsEditorOpen(false)}
+          initialPost={editingPost || undefined}
+        />
+      )}
+
       <AIChatbot /><ScrollToTop />
       <footer className="relative z-10 border-t border-white/10 py-24 glass-panel mt-24">
         <div className="max-w-[1600px] mx-auto px-[5vw] text-center">
