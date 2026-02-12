@@ -11,7 +11,7 @@ const DEFAULT_CONFIG: SiteConfig = {
   navItems: [
     { id: '1', name: { en: 'Home', bn: 'হোম', ar: 'الرئيسية' }, path: 'home', isCustom: false },
     { id: '2', name: { en: 'Saudi Helper', bn: 'সৌদি হেল্পার', ar: 'مساعد السعودية' }, path: 'saudi-helper', isCustom: false },
-    { id: '3', name: { en: 'AI Tools', bn: 'সেরা এআই টুলস', ar: 'أদوات الذكاء الاصطناعي' }, path: 'ai-tools', isCustom: false },
+    { id: '3', name: { en: 'AI Tools', bn: 'সেরা এআই টুলস', ar: 'أدوات الذكاء الاصطناعي' }, path: 'ai-tools', isCustom: false },
     { id: '4', name: { en: 'AI News', bn: 'এআই নিউজ', ar: 'أخبار الذكاء الاصطناعي' }, path: 'news', isCustom: false }
   ]
 };
@@ -79,23 +79,22 @@ export function useStore() {
     setPosts(prev => prev.map(p => p.id === postId ? { ...p, views: p.views + 1 } : p));
   }, []);
 
+  // Fix: Added toggleLike function to manage user likes and update post counts accordingly
   const toggleLike = useCallback((postId: string) => {
     if (!currentUser) return;
-
-    const isLiked = (currentUser.likedPosts || []).includes(postId);
+    
+    const currentLikedPosts = currentUser.likedPosts || [];
+    const isLiked = currentLikedPosts.includes(postId);
     const newLikedPosts = isLiked 
-      ? currentUser.likedPosts.filter(id => id !== postId)
-      : [...(currentUser.likedPosts || []), postId];
-
+      ? currentLikedPosts.filter(id => id !== postId)
+      : [...currentLikedPosts, postId];
+    
     setCurrentUser({ ...currentUser, likedPosts: newLikedPosts });
     setPosts(prev => prev.map(p => 
       p.id === postId 
         ? { ...p, likes: isLiked ? Math.max(0, p.likes - 1) : p.likes + 1 } 
         : p
     ));
-    
-    // Update the user in the all users list too
-    setUsers(prev => prev.map(u => u.id === currentUser.id ? { ...u, likedPosts: newLikedPosts } : u));
   }, [currentUser]);
 
   return {
@@ -105,6 +104,7 @@ export function useStore() {
     users, addUser, deleteUser,
     siteConfig, updateConfig,
     lang, setLang,
-    incrementView, toggleLike
+    incrementView,
+    toggleLike
   };
 }

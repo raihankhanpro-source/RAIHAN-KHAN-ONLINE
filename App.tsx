@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from './hooks/useStore';
 import { Post, Comment, User, Language, AISuggestion } from './types';
@@ -14,7 +13,7 @@ import ScrollToTop from './components/ScrollToTop';
 import QuantumSpinner from './components/QuantumSpinner';
 import PostEditor from './components/PostEditor';
 import { analyzeCommentSentiment, getAIContentSuggestions } from './services/gemini';
-import { auth } from './services/firebase';
+import { auth, initializeAnalytics } from './services/firebase';
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
@@ -61,16 +60,18 @@ const App: React.FC = () => {
 
   const t = TRANSLATIONS[lang];
 
-  // --- FIREBASE AUTH SYNC ---
+  useEffect(() => {
+    initializeAnalytics();
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
-        // Sync firebase user with our internal user model
         const matchedUser = users.find(u => u.email === firebaseUser.email);
         if (matchedUser) {
           setCurrentUser({
             ...matchedUser,
-            id: firebaseUser.uid, // Ensure ID syncs
+            id: firebaseUser.uid,
             avatar: firebaseUser.photoURL || matchedUser.avatar
           });
         } else {
@@ -96,7 +97,18 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, [users, setCurrentUser]);
 
-  // --- ENHANCED SEO & METADATA MANAGEMENT ---
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const postId = params.get('post');
+    if (postId && posts.length > 0) {
+      const post = posts.find(p => p.id === postId);
+      if (post) {
+        handlePostClick(post);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+  }, [posts]);
+
   useEffect(() => {
     const updateMetadata = () => {
       let title = siteConfig.siteName;
@@ -111,62 +123,9 @@ const App: React.FC = () => {
         keywords = selectedPost.seo?.keywords?.join(', ') || keywords;
         image = selectedPost.seo?.ogImage || selectedPost.image;
         robots = selectedPost.seo?.robots || robots;
-
-        const schema = {
-          "@context": "https://schema.org",
-          "@type": "BlogPosting",
-          "headline": selectedPost.title[lang],
-          "image": [selectedPost.image],
-          "datePublished": selectedPost.date,
-          "author": [{
-              "@type": "Person",
-              "name": selectedPost.author,
-              "url": window.location.origin
-            }],
-          "description": description,
-          "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": window.location.href
-          }
-        };
-
-        const existingScript = document.getElementById('json-ld-schema');
-        if (existingScript) existingScript.remove();
-
-        const script = document.createElement('script');
-        script.id = 'json-ld-schema';
-        script.type = 'application/ld+json';
-        script.text = JSON.stringify(schema);
-        document.head.appendChild(script);
       }
 
       document.title = title;
-      
-      const metas = [
-        { name: "description", content: description },
-        { name: "keywords", content: keywords },
-        { name: "robots", content: robots },
-        { property: "og:title", content: title },
-        { property: "og:description", content: description },
-        { property: "og:image", content: image },
-        { property: "og:type", content: "website" },
-        { name: "twitter:card", content: "summary_large_image" },
-        { name: "twitter:title", content: title },
-        { name: "twitter:description", content: description },
-        { name: "twitter:image", content: image }
-      ];
-
-      metas.forEach(m => {
-        const selector = m.name ? `meta[name="${m.name}"]` : `meta[property="${m.property}"]`;
-        let element = document.querySelector(selector);
-        if (!element) {
-          element = document.createElement('meta');
-          if (m.name) element.setAttribute('name', m.name);
-          if (m.property) element.setAttribute('property', m.property);
-          document.head.appendChild(element);
-        }
-        element.setAttribute('content', m.content);
-      });
     };
 
     updateMetadata();
@@ -213,6 +172,7 @@ const App: React.FC = () => {
     } catch (error: any) {
       console.error("Auth Error:", error);
       setAuthError(error.message || 'Authentication failed. Please try again.');
+    } finally {
       setIsAuthLoading(false);
     }
   };
@@ -223,14 +183,6 @@ const App: React.FC = () => {
       setPath('home');
     } catch (error) {
       console.error("Logout Error:", error);
-    }
-  };
-
-  const handleModeration = (commentId: string, status: 'approved' | 'rejected' | 'delete') => {
-    if (status === 'delete') {
-      setComments(comments.filter(c => c.id !== commentId));
-    } else {
-      setComments(comments.map(c => c.id === commentId ? { ...c, status } : c));
     }
   };
 
@@ -245,12 +197,6 @@ const App: React.FC = () => {
       setCurrentUser({ ...currentUser, history: newHistory });
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(window.location.href);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   const renderSaudiHelper = () => (
@@ -276,7 +222,7 @@ const App: React.FC = () => {
                   <span className="text-[10px] font-orbitron font-black text-emerald-500 uppercase tracking-[0.2em]">{item.category}</span>
                 </div>
               </div>
-              <a href={item.url} target="_blank" rel="noreferrer" className="p-3 rounded-2xl bg-white/5 border border-white/10 hover:bg-emerald-500 hover:text-black transition-all" aria-label={`Visit ${item.title[lang]} official site`}>
+              <a href={item.url} target="_blank" rel="noreferrer" className="p-3 rounded-2xl bg-white/5 border border-white/10 hover:bg-emerald-500 hover:text-black transition-all">
                 <ExternalLink className="w-5 h-5" />
               </a>
             </div>
@@ -293,20 +239,13 @@ const App: React.FC = () => {
 
   const renderPostDetail = () => {
     if (!selectedPost) return renderHome();
-    const shareUrl = window.location.href;
+    const shareUrl = window.location.origin + '?post=' + selectedPost.id;
     const shareTitle = selectedPost.title[lang];
     const isLiked = (currentUser?.likedPosts || []).includes(selectedPost.id);
 
-    const shareLinks = {
-      facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`,
-      twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareTitle)}&url=${encodeURIComponent(shareUrl)}`,
-      linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`,
-      whatsapp: `https://api.whatsapp.com/send?text=${encodeURIComponent(shareTitle + ' ' + shareUrl)}`
-    };
-
     return (
       <article className="max-w-4xl mx-auto px-[5vw] py-24">
-        <nav aria-label="Breadcrumb" className="mb-12">
+        <nav className="mb-12">
           <button 
             onClick={() => setPath('home')}
             className="flex items-center gap-2 text-cyan-400 font-orbitron text-xs hover:translate-x-[-4px] transition-transform"
@@ -321,74 +260,51 @@ const App: React.FC = () => {
               src={selectedPost.image} 
               alt={selectedPost.title[lang]} 
               className="w-full h-[400px] object-cover transition-transform duration-1000 group-hover:scale-105" 
-              loading="eager"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
           </div>
-          
-          <div className="flex items-center gap-3">
-            <span className="px-3 py-1 rounded-lg bg-cyan-500/10 text-cyan-500 text-[10px] font-orbitron font-black uppercase tracking-widest border border-cyan-500/20">
-              {selectedPost.category}
-            </span>
-            <time dateTime={selectedPost.date} className="text-slate-500 text-[10px] font-orbitron font-bold uppercase tracking-widest">
-              {new Date(selectedPost.date).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
-            </time>
-          </div>
-          
           <h1 className="text-4xl md:text-6xl font-bold leading-tight tracking-tight text-white">{selectedPost.title[lang]}</h1>
-          
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 py-6 border-y border-white/5">
-            <div className="flex items-center gap-4">
-              <span className="text-[10px] font-orbitron text-slate-500 uppercase tracking-widest">By {selectedPost.author}</span>
-              <span className="w-1 h-1 bg-slate-700 rounded-full"></span>
-              <span className="text-[10px] font-orbitron text-slate-500 uppercase tracking-widest">{selectedPost.views} Views</span>
+            <div className="flex items-center gap-4 text-slate-500 font-orbitron text-[10px] uppercase">
+              <span>By {selectedPost.author}</span>
+              <span>•</span>
+              <span>{selectedPost.views} Views</span>
             </div>
-            
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-[10px] font-orbitron text-slate-400 uppercase tracking-[0.2em] font-black mr-2">INTERACT:</span>
+            <div className="flex items-center gap-3">
               <button 
                 onClick={() => toggleLike(selectedPost.id)}
-                className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-all hover:-translate-y-1 shadow-lg border ${isLiked ? 'bg-magenta-500/20 text-magenta-500 border-magenta-500/40' : 'bg-white/5 text-slate-400 border-white/10 hover:border-magenta-500/30'}`}
-                aria-label="Like Post"
+                className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-all border ${isLiked ? 'bg-magenta-500/20 text-magenta-500 border-magenta-500/40' : 'bg-white/5 text-slate-400 border-white/10'}`}
               >
                 <Heart className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} />
               </button>
-              <a href={shareLinks.facebook} target="_blank" rel="noreferrer" className="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-[#1877F2] hover:border-[#1877F2]/40 hover:bg-[#1877F2]/10 transition-all hover:-translate-y-1 shadow-lg"><Facebook className="w-5 h-5" /></a>
-              <a href={shareLinks.twitter} target="_blank" rel="noreferrer" className="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-black hover:border-white/40 transition-all hover:-translate-y-1 shadow-lg"><Twitter className="w-5 h-5" /></a>
-              <a href={shareLinks.linkedin} target="_blank" rel="noreferrer" className="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-[#0077B5] hover:border-[#0077B5]/40 hover:bg-[#0077B5]/10 transition-all hover:-translate-y-1 shadow-lg"><Linkedin className="w-5 h-5" /></a>
-              <a href={shareLinks.whatsapp} target="_blank" rel="noreferrer" className="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-[#25D366] hover:border-[#25D366]/40 hover:bg-[#25D366]/10 transition-all hover:-translate-y-1 shadow-lg"><MessageCircle className="w-5 h-5" /></a>
-              <button onClick={copyToClipboard} className={`w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center transition-all hover:-translate-y-1 shadow-lg ${copied ? 'text-green-400 border-green-500/50 bg-green-500/10' : 'text-slate-400 hover:text-cyan-400 hover:border-cyan-500/40 hover:bg-cyan-500/10'}`}>{copied ? <Check className="w-5 h-5" /> : <LinkIcon className="w-5 h-5" />}</button>
             </div>
           </div>
         </header>
         
-        <div className="prose prose-invert max-w-none text-slate-300 text-lg md:text-xl leading-loose space-y-8 mb-20 font-inter">
+        <div className="prose prose-invert max-w-none text-slate-300 text-lg md:text-xl leading-loose space-y-8 mb-20">
           {selectedPost.content[lang]}
         </div>
 
-        <section id="comments" aria-label="Comments Section">
-          <CommentSection 
-            postId={selectedPost.id}
-            comments={comments}
-            lang={lang}
-            user={currentUser}
-            onAddComment={async (text) => {
-              const status = await analyzeCommentSentiment(text);
-              const newComment: Comment = {
-                id: Math.random().toString(),
-                postId: selectedPost.id,
-                userId: currentUser?.id || 'guest',
-                userName: currentUser?.name || 'Guest User',
-                userAvatar: currentUser?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${Math.random()}`,
-                text,
-                language: lang,
-                date: new Date().toISOString(),
-                status
-              };
-              setComments(prev => [...prev, newComment]);
-            }}
-          />
-        </section>
+        <CommentSection 
+          postId={selectedPost.id}
+          comments={comments}
+          lang={lang}
+          user={currentUser}
+          onAddComment={async (text) => {
+            const status = await analyzeCommentSentiment(text);
+            const newComment: Comment = {
+              id: Math.random().toString(),
+              postId: selectedPost.id,
+              userId: currentUser?.id || 'guest',
+              userName: currentUser?.name || 'Guest User',
+              userAvatar: currentUser?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${Math.random()}`,
+              text,
+              language: lang,
+              date: new Date().toISOString(),
+              status
+            };
+            setComments(prev => [...prev, newComment]);
+          }}
+        />
       </article>
     );
   };
@@ -401,34 +317,32 @@ const App: React.FC = () => {
             <span className="w-12 h-[1px] bg-cyan-500" />
             <span className="text-[10px] font-orbitron font-black text-cyan-500 uppercase tracking-[0.5em]">Future Terminal</span>
           </div>
-          <h1 className="text-5xl md:text-7xl lg:text-9xl font-orbitron font-black mb-6 bg-gradient-to-r from-cyan-400 via-white to-magenta-400 bg-clip-text text-transparent leading-none tracking-tighter">
-            {siteConfig.siteName.split(' ')[0]} <span className="text-white">{siteConfig.siteName.split(' ').slice(1).join(' ')}</span>
+          <h1 className="text-5xl md:text-7xl lg:text-9xl font-orbitron font-black mb-6 leading-none tracking-tighter">
+            {siteConfig.siteName.split(' ')[0]} <span className="neon-brand-highlight">{siteConfig.siteName.split(' ').slice(1).join(' ')}</span>
           </h1>
           <p className="text-slate-400 max-w-xl text-lg md:text-xl font-medium leading-relaxed">
-            Navigating the neon frontiers of AI, Design, and Future Tech with high-end curation.
+            Navigating the neon frontiers of AI, Design, and Future Tech.
           </p>
         </div>
         <div className="relative group w-full md:w-auto">
-          <div className="absolute inset-0 bg-cyan-500/10 blur-2xl group-focus-within:bg-cyan-500/20 transition-all opacity-50" />
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 group-focus-within:text-cyan-400 transition-colors" />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
           <input 
             type="text" 
             placeholder={t.search}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="relative glass-panel rounded-2xl pl-12 pr-6 py-5 text-sm focus:outline-none focus:border-cyan-500/50 w-full md:min-w-[450px] shadow-2xl transition-all"
-            aria-label="Search posts"
+            className="glass-panel rounded-2xl pl-12 pr-6 py-5 text-sm focus:outline-none focus:border-cyan-500/50 w-full md:min-w-[450px]"
           />
         </div>
       </header>
 
       {!searchQuery && (
-        <section className="mb-24 reveal-item" aria-labelledby="recommended-heading">
-            <h2 id="recommended-heading" className="text-2xl md:text-3xl font-orbitron font-black mb-10 flex items-center gap-4">
+        <section className="mb-24 reveal-item">
+            <h2 className="text-2xl md:text-3xl font-orbitron font-black mb-10 flex items-center gap-4">
                 <Sparkles className="text-magenta-500" /> {t.recommended}
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-                {recommendedPosts.map((post, i) => (
+                {recommendedPosts.map((post) => (
                     <PostCard 
                       key={`rec-${post.id}`} 
                       post={post} 
@@ -443,7 +357,7 @@ const App: React.FC = () => {
         </section>
       )}
 
-      <main className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8 md:gap-12" aria-label="Latest posts grid">
+      <main className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8 md:gap-12">
         {posts
           .filter(p => p.title[lang].toLowerCase().includes(searchQuery.toLowerCase()))
           .map((post, i) => (
@@ -471,10 +385,10 @@ const App: React.FC = () => {
             <h1 className="text-5xl md:text-7xl font-orbitron font-black mb-12 text-center neon-text-cyan reveal-item">AI TOOLBOX</h1>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                 {AI_TOOLS.map((tool, i) => (
-                    <article key={tool.name} className="glass-panel p-8 rounded-3xl border border-white/5 hover:border-cyan-500/30 transition-all reveal-item" style={{ animationDelay: `${i * 0.05}s` }}>
+                    <article key={tool.name} className="glass-panel p-8 rounded-3xl border border-white/5 reveal-item" style={{ animationDelay: `${i * 0.05}s` }}>
                         <h3 className="text-xl font-bold mb-2 flex items-center gap-2"><Zap className="w-5 h-5 text-yellow-400" /> {tool.name}</h3>
                         <p className="text-slate-400 text-sm mb-6">{tool.uses}</p>
-                        <a href={tool.url} target="_blank" rel="noreferrer" className="text-cyan-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-2 group">Visit {tool.name} <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform"/></a>
+                        <a href={tool.url} target="_blank" rel="noreferrer" className="text-cyan-400 text-[10px] font-black uppercase flex items-center gap-2">Visit {tool.name} <ArrowRight className="w-3 h-3"/></a>
                     </article>
                 ))}
             </div>
@@ -505,103 +419,28 @@ const App: React.FC = () => {
             }} />
           </div>
         );
-      case 'admin':
-        if (currentUser?.role !== 'admin') return <div className="p-24 text-center text-red-500 font-orbitron">MISSION CRITICAL: ACCESS DENIED</div>;
-        return (
-            <div className="max-w-[1400px] mx-auto px-[5vw] py-24 space-y-16">
-                <header className="flex flex-col md:flex-row md:items-end justify-between gap-8 mb-12">
-                    <div>
-                      <h1 className="text-4xl md:text-6xl font-orbitron font-black neon-text-magenta reveal-item">MISSION CONTROL</h1>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.4em] mt-2 reveal-item">Dashboard Alpha V5</p>
-                    </div>
-                    <button onClick={() => { setEditingPost(null); setIsEditorOpen(true); }} className="px-8 py-3 rounded-2xl bg-cyan-500 text-black font-orbitron font-black text-xs uppercase tracking-widest hover:scale-105 transition-all shadow-[0_0_20px_rgba(0,243,255,0.4)] flex items-center gap-3 reveal-item"><FilePlus className="w-5 h-5" /> INITIALIZE TRANSMISSION</button>
-                </header>
-                <AdminAnalytics posts={posts} comments={comments} lang={lang} />
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <AIImageGenerator onGenerated={(url) => {}} />
-                    <div className="glass-panel p-8 rounded-[2.5rem] border border-white/5 reveal-item">
-                        <div className="flex items-center justify-between mb-8">
-                            <h3 className="text-xl font-orbitron font-bold flex items-center gap-3"><Lightbulb className="text-yellow-400" /> AI IDEA ENGINE</h3>
-                            <button onClick={handleFetchSuggestions} disabled={loadingSuggestions} className="relative px-4 py-2 rounded-xl bg-yellow-500/10 text-yellow-500 font-orbitron font-bold text-[10px] border border-yellow-500/30 hover:bg-yellow-500 hover:text-black transition-all flex items-center gap-2 min-w-[150px] justify-center">{loadingSuggestions ? <QuantumSpinner size="sm" color="white" /> : "GENERATE IDEAS"}</button>
-                        </div>
-                        <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                            {aiSuggestions.length === 0 ? <p className="text-center py-12 text-slate-500 text-xs font-orbitron uppercase">NO IDEAS SYNTHESIZED</p> : aiSuggestions.map((idea, i) => (
-                                <div key={i} className="p-4 rounded-2xl bg-white/5 border border-white/5 hover:border-yellow-500/30 transition-all">
-                                    <h4 className="font-bold text-sm text-yellow-100 mb-1">{idea.potentialTitle}</h4>
-                                    <p className="text-[10px] text-slate-500 mb-3">{idea.reason}</p>
-                                    <div className="flex justify-between items-center">
-                                        <span className="px-2 py-0.5 rounded-lg bg-yellow-500/10 text-[8px] font-orbitron font-black text-yellow-500 uppercase">{idea.topic}</span>
-                                        <button onClick={() => { setEditingPost({ title: { en: idea.potentialTitle, bn: '', ar: '' }, summary: { en: idea.reason, bn: '', ar: '' }, content: { en: '', bn: '', ar: '' }, category: idea.topic, seo: { title: idea.potentialTitle, description: idea.reason, keywords: [], robots: 'index, follow' } } as any); setIsEditorOpen(true); }} className="text-[8px] font-orbitron font-black text-cyan-400 hover:text-white uppercase flex items-center gap-1">DRAFT POST <ArrowRight className="w-2 h-2" /></button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-                {isEditorOpen && <PostEditor lang={lang} initialPost={editingPost || undefined} onSave={(post) => { if (editingPost) { deletePost(editingPost.id); addPost(post); } else { addPost(post); } setIsEditorOpen(false); setEditingPost(null); }} onCancel={() => { setIsEditorOpen(false); setEditingPost(null); }} />}
-            </div>
-        );
-      case 'profile':
-        if (!currentUser) return null;
-        return (
-            <div className="max-w-[1200px] mx-auto px-[5vw] py-24">
-                <header className="glass-panel p-12 rounded-[3rem] text-center mb-12 reveal-item">
-                    <img src={currentUser.avatar} className="w-32 h-32 md:w-48 md:h-48 rounded-full mx-auto mb-8 border-4 border-cyan-500 shadow-2xl" alt={currentUser.name} />
-                    <h1 className="text-4xl md:text-6xl font-orbitron font-black mb-2">{currentUser.name}</h1>
-                    <p className="text-cyan-400 font-orbitron text-xs md:text-sm uppercase tracking-widest mb-8">{currentUser.role}</p>
-                </header>
-                <section className="glass-panel p-8 rounded-[2.5rem] mb-12 reveal-item">
-                    <h2 className="text-xl font-orbitron font-bold flex items-center gap-3 mb-6"><Bell className="text-cyan-400" /> SUBSCRIPTION HUB</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {['Daily Digest', 'AI Trends', 'New Comments'].map(topic => (
-                            <div key={topic} className="flex items-center justify-between p-4 rounded-xl bg-white/5 border border-white/5">
-                                <span className="text-sm font-bold">{topic}</span>
-                                <button onClick={() => { const currentSubs = currentUser.subscriptions || []; const newSubs = currentSubs.includes(topic) ? currentSubs.filter(s => s !== topic) : [...currentSubs, topic]; setCurrentUser({...currentUser, subscriptions: newSubs}); }} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${(currentUser.subscriptions || []).includes(topic) ? 'bg-cyan-500 text-black shadow-[0_0_10px_#00f3ff]' : 'bg-white/5 text-slate-500'}`}>{ (currentUser.subscriptions || []).includes(topic) ? <Check className="w-5 h-5" /> : <Plus className="w-5 h-5" /> }</button>
-                            </div>
-                        ))}
-                    </div>
-                </section>
-            </div>
-        );
       case 'post-detail': return renderPostDetail();
       case 'login': return (
         <div className="min-h-[80vh] flex items-center justify-center px-[5vw]">
             <div className="w-full max-w-md glass-panel p-10 rounded-[3rem] border border-white/10 reveal-item">
                 <header className="text-center mb-10">
                     {isSignUp ? <UserPlus className="w-12 h-12 text-magenta-400 mx-auto mb-6" /> : <Key className="w-12 h-12 text-cyan-400 mx-auto mb-6" />}
-                    <h2 className="text-2xl font-orbitron font-bold tracking-tight">{isSignUp ? 'New Account Protocol' : 'Secure Access'}</h2>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-2">Firebase Auth Protocol Active</p>
+                    <h2 className="text-2xl font-orbitron font-bold tracking-tight">{isSignUp ? 'New Protocol' : 'Terminal Access'}</h2>
                 </header>
-                {isAuthLoading ? (
-                  <div className="flex flex-col items-center justify-center py-12 gap-6">
-                    <QuantumSpinner size="lg" color={isSignUp ? "magenta" : "cyan"} />
-                    <p className="text-[10px] font-orbitron font-black text-cyan-500 animate-pulse tracking-[0.2em] uppercase">Synchronizing...</p>
-                  </div>
-                ) : (
-                  <form onSubmit={handleAuthAction} className="space-y-6">
-                      {isSignUp && (
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-orbitron font-black text-slate-500 uppercase tracking-widest px-2">Display Name</label>
-                          <input type="text" placeholder="Quantum Explorer" required value={displayName} onChange={e => setDisplayName(e.target.value)} className="w-full bg-black/40 p-4 rounded-2xl border border-white/10 focus:border-magenta-500/50 focus:outline-none transition-colors text-white" />
-                        </div>
-                      )}
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-orbitron font-black text-slate-500 uppercase tracking-widest px-2">Email Address</label>
-                        <input type="email" placeholder="raihankhanpro@gmail.com" required value={email} onChange={e => setEmail(e.target.value)} className={`w-full bg-black/40 p-4 rounded-2xl border border-white/10 ${isSignUp ? 'focus:border-magenta-500/50' : 'focus:border-cyan-500/50'} focus:outline-none transition-colors text-white`} />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-orbitron font-black text-slate-500 uppercase tracking-widest px-2">Security Key</label>
-                        <input type="password" placeholder="••••••••" required value={password} onChange={e => setPassword(e.target.value)} className={`w-full bg-black/40 p-4 rounded-2xl border border-white/10 ${isSignUp ? 'focus:border-magenta-500/50' : 'focus:border-cyan-500/50'} focus:outline-none transition-colors text-white`} />
-                      </div>
-                      {authError && <p className="text-xs text-red-500 text-center font-bold uppercase tracking-tighter bg-red-500/10 p-3 rounded-xl border border-red-500/20">{authError}</p>}
-                      <button className={`w-full py-5 rounded-2xl ${isSignUp ? 'bg-magenta-500 shadow-[0_0_20px_rgba(255,0,255,0.4)]' : 'bg-cyan-500 shadow-[0_0_20px_rgba(0,243,255,0.4)]'} text-black font-orbitron font-black uppercase tracking-widest hover:scale-105 transition-all active:scale-95`}>{isSignUp ? 'REGISTER ID' : 'INITIALIZE ACCESS'}</button>
-                      <div className="pt-4 text-center">
-                        <button type="button" onClick={() => { setIsSignUp(!isSignUp); setAuthError(''); }} className="text-[10px] font-orbitron font-black uppercase tracking-widest text-slate-500 hover:text-white transition-colors">
-                          {isSignUp ? 'Already have credentials? Access Terminal' : 'No account? Register New Identity'}
-                        </button>
-                      </div>
-                  </form>
-                )}
+                <form onSubmit={handleAuthAction} className="space-y-6">
+                    {isSignUp && (
+                      <input type="text" placeholder="Name" required value={displayName} onChange={e => setDisplayName(e.target.value)} className="w-full bg-black/40 p-4 rounded-2xl border border-white/10" />
+                    )}
+                    <input type="email" placeholder="Email" required value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-black/40 p-4 rounded-2xl border border-white/10" />
+                    <input type="password" placeholder="Password" required value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-black/40 p-4 rounded-2xl border border-white/10" />
+                    {authError && <p className="text-xs text-red-500 text-center">{authError}</p>}
+                    <button className="w-full py-5 rounded-2xl bg-cyan-500 text-black font-orbitron font-black uppercase tracking-widest">{isSignUp ? 'Register' : 'Login'}</button>
+                    <div className="text-center">
+                      <button type="button" onClick={() => setIsSignUp(!isSignUp)} className="text-[10px] font-orbitron text-slate-500 uppercase">
+                        {isSignUp ? 'Already have an account? Login' : 'Need an account? Sign Up'}
+                      </button>
+                    </div>
+                </form>
             </div>
         </div>
       );
@@ -610,15 +449,16 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className={`min-h-screen text-slate-100 selection:bg-cyan-500 selection:text-black ${lang === 'ar' ? 'rtl' : 'ltr'}`}>
+    <div className={`min-h-screen text-slate-100 ${lang === 'ar' ? 'rtl' : 'ltr'}`}>
       <Navbar lang={lang} setLang={setLang} user={currentUser} currentPath={path} setPath={setPath} onLogout={handleLogout} config={siteConfig} />
-      <main id="main-content" className="relative z-10 pt-16 overflow-x-hidden min-h-screen">{renderContent()}</main>
+      <main className="relative z-10 pt-16 min-h-screen">{renderContent()}</main>
       <AIChatbot /><ScrollToTop />
       <footer className="relative z-10 border-t border-white/10 py-24 glass-panel mt-24">
         <div className="max-w-[1600px] mx-auto px-[5vw] text-center">
-            <div className="font-orbitron font-black text-3xl md:text-5xl mb-8 tracking-tighter reveal-item">RAIHAN KHAN <span className="neon-text-cyan">ONLINE</span></div>
-            <nav className="flex justify-center flex-wrap gap-8 mb-16 reveal-item">{SOCIAL_HANDLES.map(s => (<a key={s.name} href={s.url} target="_blank" rel="noreferrer" className="text-slate-500 hover:text-white transition-colors uppercase font-orbitron text-[10px] md:text-xs font-bold tracking-[0.2em]">{s.name}</a>))}</nav>
-            <p className="text-[10px] text-slate-600 font-orbitron tracking-[0.4em] uppercase reveal-item">© 2025 ALL RIGHTS RESERVED • ENGINEERED BY RAIHAN KHAN • V5.0 GEMINI INTELLIGENCE</p>
+            <div className="font-orbitron font-black text-3xl md:text-5xl mb-8 tracking-tighter">
+              RAIHAN KHAN <span className="neon-brand-highlight">ONLINE</span>
+            </div>
+            <p className="text-[10px] text-slate-600 font-orbitron tracking-[0.4em] uppercase">© 2025 ALL RIGHTS RESERVED • ENGINEERED BY RAIHAN KHAN</p>
         </div>
       </footer>
     </div>
