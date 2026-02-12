@@ -2,16 +2,18 @@
 import React from 'react';
 import { Post, Language } from '../types';
 import { TRANSLATIONS } from '../constants';
-import { Calendar, Eye, ThumbsUp, ArrowRight, Star, Clock } from 'lucide-react';
+import { Calendar, Eye, ThumbsUp, ArrowRight, Star, Clock, Heart } from 'lucide-react';
 
 interface PostCardProps {
   post: Post;
   lang: Language;
   onClick: () => void;
+  onLike?: (e: React.MouseEvent) => void;
+  isLiked?: boolean;
   isRecommended?: boolean;
 }
 
-const PostCard: React.FC<PostCardProps> = ({ post, lang, onClick, isRecommended }) => {
+const PostCard: React.FC<PostCardProps> = ({ post, lang, onClick, onLike, isLiked, isRecommended }) => {
   const t = TRANSLATIONS[lang];
   
   return (
@@ -71,9 +73,12 @@ const PostCard: React.FC<PostCardProps> = ({ post, lang, onClick, isRecommended 
             <span className="flex items-center gap-1.5 group-hover:text-cyan-400 transition-colors uppercase">
                 <Eye className="w-3.5 h-3.5" /> {post.views}
             </span>
-            <span className="flex items-center gap-1.5 group-hover:text-magenta-500 transition-colors uppercase">
-                <ThumbsUp className="w-3.5 h-3.5" /> {post.likes}
-            </span>
+            <button 
+              onClick={(e) => { e.stopPropagation(); onLike?.(e); }}
+              className={`flex items-center gap-1.5 transition-all uppercase hover:scale-110 active:scale-90 ${isLiked ? 'text-magenta-500' : 'text-slate-500 hover:text-magenta-400'}`}
+            >
+                <Heart className={`w-3.5 h-3.5 ${isLiked ? 'fill-current' : ''}`} /> {post.likes}
+            </button>
           </div>
           <div className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center text-slate-500 group-hover:border-cyan-500 group-hover:text-cyan-400 transition-all group-hover:translate-x-1">
             <ArrowRight className="w-5 h-5" aria-hidden="true" />

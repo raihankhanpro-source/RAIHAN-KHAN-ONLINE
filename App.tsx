@@ -15,7 +15,13 @@ import QuantumSpinner from './components/QuantumSpinner';
 import PostEditor from './components/PostEditor';
 import { analyzeCommentSentiment, getAIContentSuggestions } from './services/gemini';
 import { auth } from './services/firebase';
-import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged,
+  updateProfile
+} from "firebase/auth";
 import { 
   Plus, Edit3, Trash2, ChevronUp, ChevronDown, 
   BarChart3, Settings, List, BrainCircuit, User as UserIcon,
@@ -23,7 +29,7 @@ import {
   ExternalLink, Facebook, Instagram, Send, Bot, Info, Globe, ArrowRight,
   HeartHandshake, BookOpen, ShieldCheck, MapPin, Key, UserPlus, MessageSquare,
   CheckCircle, XCircle, History, Zap, Bell, Check, Lightbulb, Loader2,
-  Twitter, Linkedin, MessageCircle, Link as LinkIcon, FilePlus
+  Twitter, Linkedin, MessageCircle, Link as LinkIcon, FilePlus, UserCircle
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -34,7 +40,7 @@ const App: React.FC = () => {
     users, addUser, deleteUser,
     siteConfig,
     lang, setLang,
-    incrementView
+    incrementView, toggleLike
   } = useStore();
 
   const [path, setPath] = useState('home');
@@ -46,9 +52,11 @@ const App: React.FC = () => {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isSignUp, setIsSignUp] = useState(false);
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [authError, setAuthError] = useState('');
 
   const t = TRANSLATIONS[lang];
@@ -60,18 +68,22 @@ const App: React.FC = () => {
         // Sync firebase user with our internal user model
         const matchedUser = users.find(u => u.email === firebaseUser.email);
         if (matchedUser) {
-          setCurrentUser(matchedUser);
+          setCurrentUser({
+            ...matchedUser,
+            id: firebaseUser.uid, // Ensure ID syncs
+            avatar: firebaseUser.photoURL || matchedUser.avatar
+          });
         } else {
-          // If no match found in our static/local users list, create a basic user object
           const newUser: User = {
             id: firebaseUser.uid,
             name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Unknown User',
             email: firebaseUser.email || '',
             avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
-            role: 'user',
+            role: firebaseUser.email === 'raihankhanpro@gmail.com' ? 'admin' : 'user',
             interests: [],
             history: [],
-            subscriptions: []
+            subscriptions: [],
+            likedPosts: []
           };
           setCurrentUser(newUser);
         }
@@ -90,7 +102,7 @@ const App: React.FC = () => {
       let title = siteConfig.siteName;
       let description = "Futuristic AI blogging platform and Saudi Arabia expat guide.";
       let keywords = "AI, Saudi Arabia, Expat Guide, Tech, Design, Raihan Khan";
-      let image = "/logo.png"; // Fallback logo
+      let image = "/logo.png"; 
       let robots = "index, follow";
 
       if (path === 'post-detail' && selectedPost) {
@@ -100,7 +112,6 @@ const App: React.FC = () => {
         image = selectedPost.seo?.ogImage || selectedPost.image;
         robots = selectedPost.seo?.robots || robots;
 
-        // Inject JSON-LD Schema for rich results
         const schema = {
           "@context": "https://schema.org",
           "@type": "BlogPosting",
@@ -131,7 +142,6 @@ const App: React.FC = () => {
 
       document.title = title;
       
-      // Update Meta Tags
       const metas = [
         { name: "description", content: description },
         { name: "keywords", content: keywords },
@@ -162,19 +172,14 @@ const App: React.FC = () => {
     updateMetadata();
   }, [path, selectedPost, lang, siteConfig.siteName]);
 
-  // Logic for Recommended Feed
   const recommendedPosts = useMemo(() => {
     if (!currentUser || !currentUser.history || currentUser.history.length === 0) return posts.slice(0, 4);
-    
-    // Personalization: find most viewed categories
     const categoriesCount: Record<string, number> = {};
     currentUser.history.forEach(h => {
         const post = posts.find(p => p.id === h.postId);
         if (post) categoriesCount[post.category] = (categoriesCount[post.category] || 0) + 1;
     });
-
     const topCategory = Object.entries(categoriesCount).sort((a, b) => b[1] - a[1])[0]?.[0];
-    
     return posts
       .filter(p => p.category === topCategory)
       .concat(posts.filter(p => p.category !== topCategory))
@@ -188,18 +193,26 @@ const App: React.FC = () => {
     setLoadingSuggestions(false);
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleAuthAction = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
     setIsAuthLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      if (isSignUp) {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        if (displayName) {
+          await updateProfile(userCredential.user, { displayName });
+        }
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
       setPath('home');
       setEmail('');
       setPassword('');
+      setDisplayName('');
     } catch (error: any) {
       console.error("Auth Error:", error);
-      setAuthError('Authentication failed. Check your credentials.');
+      setAuthError(error.message || 'Authentication failed. Please try again.');
       setIsAuthLoading(false);
     }
   };
@@ -225,14 +238,12 @@ const App: React.FC = () => {
     setSelectedPost(post);
     setPath('post-detail');
     incrementView(post.id);
-
     if (currentUser) {
       const historyItem = { postId: post.id, viewedAt: new Date().toISOString() };
       const filteredHistory = (currentUser.history || []).filter(h => h.postId !== post.id);
       const newHistory = [historyItem, ...filteredHistory].slice(0, 12); 
       setCurrentUser({ ...currentUser, history: newHistory });
     }
-    
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -282,9 +293,9 @@ const App: React.FC = () => {
 
   const renderPostDetail = () => {
     if (!selectedPost) return renderHome();
-    
     const shareUrl = window.location.href;
     const shareTitle = selectedPost.title[lang];
+    const isLiked = (currentUser?.likedPosts || []).includes(selectedPost.id);
 
     const shareLinks = {
       facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`,
@@ -334,50 +345,19 @@ const App: React.FC = () => {
             </div>
             
             <div className="flex flex-wrap items-center gap-3">
-              <span className="text-[10px] font-orbitron text-slate-400 uppercase tracking-[0.2em] font-black mr-2">SHARE TRANSMISSION:</span>
-              <a 
-                href={shareLinks.facebook} 
-                target="_blank" 
-                rel="noreferrer"
-                className="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-[#1877F2] hover:border-[#1877F2]/40 hover:bg-[#1877F2]/10 transition-all hover:-translate-y-1 shadow-lg"
-                aria-label="Share on Facebook"
-              >
-                <Facebook className="w-5 h-5" />
-              </a>
-              <a 
-                href={shareLinks.twitter} 
-                target="_blank" 
-                rel="noreferrer"
-                className="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-black hover:border-white/40 transition-all hover:-translate-y-1 shadow-lg"
-                aria-label="Share on X (Twitter)"
-              >
-                <Twitter className="w-5 h-5" />
-              </a>
-              <a 
-                href={shareLinks.linkedin} 
-                target="_blank" 
-                rel="noreferrer"
-                className="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-[#0077B5] hover:border-[#0077B5]/40 hover:bg-[#0077B5]/10 transition-all hover:-translate-y-1 shadow-lg"
-                aria-label="Share on LinkedIn"
-              >
-                <Linkedin className="w-5 h-5" />
-              </a>
-              <a 
-                href={shareLinks.whatsapp} 
-                target="_blank" 
-                rel="noreferrer"
-                className="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-[#25D366] hover:border-[#25D366]/40 hover:bg-[#25D366]/10 transition-all hover:-translate-y-1 shadow-lg"
-                aria-label="Share on WhatsApp"
-              >
-                <MessageCircle className="w-5 h-5" />
-              </a>
+              <span className="text-[10px] font-orbitron text-slate-400 uppercase tracking-[0.2em] font-black mr-2">INTERACT:</span>
               <button 
-                onClick={copyToClipboard}
-                className={`w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center transition-all hover:-translate-y-1 shadow-lg ${copied ? 'text-green-400 border-green-500/50 bg-green-500/10' : 'text-slate-400 hover:text-cyan-400 hover:border-cyan-500/40 hover:bg-cyan-500/10'}`}
-                aria-label="Copy post link"
+                onClick={() => toggleLike(selectedPost.id)}
+                className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-all hover:-translate-y-1 shadow-lg border ${isLiked ? 'bg-magenta-500/20 text-magenta-500 border-magenta-500/40' : 'bg-white/5 text-slate-400 border-white/10 hover:border-magenta-500/30'}`}
+                aria-label="Like Post"
               >
-                {copied ? <Check className="w-5 h-5" /> : <LinkIcon className="w-5 h-5" />}
+                <Heart className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} />
               </button>
+              <a href={shareLinks.facebook} target="_blank" rel="noreferrer" className="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-[#1877F2] hover:border-[#1877F2]/40 hover:bg-[#1877F2]/10 transition-all hover:-translate-y-1 shadow-lg"><Facebook className="w-5 h-5" /></a>
+              <a href={shareLinks.twitter} target="_blank" rel="noreferrer" className="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-black hover:border-white/40 transition-all hover:-translate-y-1 shadow-lg"><Twitter className="w-5 h-5" /></a>
+              <a href={shareLinks.linkedin} target="_blank" rel="noreferrer" className="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-[#0077B5] hover:border-[#0077B5]/40 hover:bg-[#0077B5]/10 transition-all hover:-translate-y-1 shadow-lg"><Linkedin className="w-5 h-5" /></a>
+              <a href={shareLinks.whatsapp} target="_blank" rel="noreferrer" className="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-[#25D366] hover:border-[#25D366]/40 hover:bg-[#25D366]/10 transition-all hover:-translate-y-1 shadow-lg"><MessageCircle className="w-5 h-5" /></a>
+              <button onClick={copyToClipboard} className={`w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center transition-all hover:-translate-y-1 shadow-lg ${copied ? 'text-green-400 border-green-500/50 bg-green-500/10' : 'text-slate-400 hover:text-cyan-400 hover:border-cyan-500/40 hover:bg-cyan-500/10'}`}>{copied ? <Check className="w-5 h-5" /> : <LinkIcon className="w-5 h-5" />}</button>
             </div>
           </div>
         </header>
@@ -442,7 +422,6 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* Recommended Section */}
       {!searchQuery && (
         <section className="mb-24 reveal-item" aria-labelledby="recommended-heading">
             <h2 id="recommended-heading" className="text-2xl md:text-3xl font-orbitron font-black mb-10 flex items-center gap-4">
@@ -450,7 +429,15 @@ const App: React.FC = () => {
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
                 {recommendedPosts.map((post, i) => (
-                    <PostCard key={`rec-${post.id}`} post={post} lang={lang} onClick={() => handlePostClick(post)} isRecommended={true} />
+                    <PostCard 
+                      key={`rec-${post.id}`} 
+                      post={post} 
+                      lang={lang} 
+                      onClick={() => handlePostClick(post)} 
+                      onLike={() => toggleLike(post.id)}
+                      isLiked={(currentUser?.likedPosts || []).includes(post.id)}
+                      isRecommended={true} 
+                    />
                 ))}
             </div>
         </section>
@@ -465,6 +452,8 @@ const App: React.FC = () => {
                 post={post} 
                 lang={lang} 
                 onClick={() => handlePostClick(post)} 
+                onLike={() => toggleLike(post.id)}
+                isLiked={(currentUser?.likedPosts || []).includes(post.id)}
               />
           </div>
         ))}
@@ -482,18 +471,10 @@ const App: React.FC = () => {
             <h1 className="text-5xl md:text-7xl font-orbitron font-black mb-12 text-center neon-text-cyan reveal-item">AI TOOLBOX</h1>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                 {AI_TOOLS.map((tool, i) => (
-                    <article 
-                        key={tool.name} 
-                        className="glass-panel p-8 rounded-3xl border border-white/5 hover:border-cyan-500/30 transition-all reveal-item"
-                        style={{ animationDelay: `${i * 0.05}s` }}
-                    >
-                        <h3 className="text-xl font-bold mb-2 flex items-center gap-2">
-                           <Zap className="w-5 h-5 text-yellow-400" /> {tool.name}
-                        </h3>
+                    <article key={tool.name} className="glass-panel p-8 rounded-3xl border border-white/5 hover:border-cyan-500/30 transition-all reveal-item" style={{ animationDelay: `${i * 0.05}s` }}>
+                        <h3 className="text-xl font-bold mb-2 flex items-center gap-2"><Zap className="w-5 h-5 text-yellow-400" /> {tool.name}</h3>
                         <p className="text-slate-400 text-sm mb-6">{tool.uses}</p>
-                        <a href={tool.url} target="_blank" rel="noreferrer" className="text-cyan-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-2 group">
-                            Visit {tool.name} <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform"/>
-                        </a>
+                        <a href={tool.url} target="_blank" rel="noreferrer" className="text-cyan-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-2 group">Visit {tool.name} <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform"/></a>
                     </article>
                 ))}
             </div>
@@ -503,27 +484,25 @@ const App: React.FC = () => {
         return (
           <div className="max-w-[1400px] mx-auto px-[5vw] py-24">
             <h1 className="text-5xl md:text-7xl font-orbitron font-black mb-12 reveal-item">VIRAL <span className="neon-text-cyan">NEWS</span></h1>
-            <div className="reveal-item" style={{ animationDelay: '0.1s' }}>
-              <AdminNewsGenerator lang={lang} onAddNewsAsPost={(news) => {
-                  const newPost: Post = {
-                      id: Math.random().toString(),
-                      title: { en: news.headline, bn: news.headline, ar: news.headline },
-                      summary: { en: news.summary, bn: news.summary, ar: news.summary },
-                      content: { en: news.summary, bn: news.summary, ar: news.summary },
-                      author: 'AI Reporter',
-                      date: new Date().toISOString(),
-                      image: `https://picsum.photos/seed/${Math.random()}/1200/600`,
-                      category: 'AI',
-                      priority: 5,
-                      tags: ['AI', 'News'],
-                      views: 0,
-                      likes: 0,
-                      seo: { title: news.headline, description: news.summary, keywords: [], robots: 'index, follow' }
-                  };
-                  addPost(newPost);
-                  setPath('home');
-              }} />
-            </div>
+            <AdminNewsGenerator lang={lang} onAddNewsAsPost={(news) => {
+                const newPost: Post = {
+                    id: Math.random().toString(),
+                    title: { en: news.headline, bn: news.headline, ar: news.headline },
+                    summary: { en: news.summary, bn: news.summary, ar: news.summary },
+                    content: { en: news.summary, bn: news.summary, ar: news.summary },
+                    author: 'AI Reporter',
+                    date: new Date().toISOString(),
+                    image: `https://picsum.photos/seed/${Math.random()}/1200/600`,
+                    category: 'AI',
+                    priority: 5,
+                    tags: ['AI', 'News'],
+                    views: 0,
+                    likes: 0,
+                    seo: { title: news.headline, description: news.summary, keywords: [], robots: 'index, follow' }
+                };
+                addPost(newPost);
+                setPath('home');
+            }} />
           </div>
         );
       case 'admin':
@@ -533,197 +512,33 @@ const App: React.FC = () => {
                 <header className="flex flex-col md:flex-row md:items-end justify-between gap-8 mb-12">
                     <div>
                       <h1 className="text-4xl md:text-6xl font-orbitron font-black neon-text-magenta reveal-item">MISSION CONTROL</h1>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.4em] mt-2 reveal-item" style={{ animationDelay: '0.05s' }}>Quantum Dashboard Alpha V5</p>
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.4em] mt-2 reveal-item">Dashboard Alpha V5</p>
                     </div>
-                    <button 
-                      onClick={() => { setEditingPost(null); setIsEditorOpen(true); }}
-                      className="px-8 py-3 rounded-2xl bg-cyan-500 text-black font-orbitron font-black text-xs uppercase tracking-widest hover:scale-105 transition-all shadow-[0_0_20px_rgba(0,243,255,0.4)] flex items-center gap-3 reveal-item"
-                      style={{ animationDelay: '0.1s' }}
-                    >
-                      <FilePlus className="w-5 h-5" /> INITIALIZE NEW TRANSMISSION
-                    </button>
+                    <button onClick={() => { setEditingPost(null); setIsEditorOpen(true); }} className="px-8 py-3 rounded-2xl bg-cyan-500 text-black font-orbitron font-black text-xs uppercase tracking-widest hover:scale-105 transition-all shadow-[0_0_20px_rgba(0,243,255,0.4)] flex items-center gap-3 reveal-item"><FilePlus className="w-5 h-5" /> INITIALIZE TRANSMISSION</button>
                 </header>
-
-                <div className="reveal-item" style={{ animationDelay: '0.15s' }}>
-                    <AdminAnalytics posts={posts} comments={comments} lang={lang} />
-                </div>
-
+                <AdminAnalytics posts={posts} comments={comments} lang={lang} />
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <div className="reveal-item" style={{ animationDelay: '0.2s' }}>
-                        <AIImageGenerator onGenerated={(url) => {
-                            // Pre-fill a draft or show a success toast
-                        }} />
-                    </div>
-                    
-                    <div className="glass-panel p-8 rounded-[2.5rem] border border-white/5 reveal-item" style={{ animationDelay: '0.3s' }}>
+                    <AIImageGenerator onGenerated={(url) => {}} />
+                    <div className="glass-panel p-8 rounded-[2.5rem] border border-white/5 reveal-item">
                         <div className="flex items-center justify-between mb-8">
-                            <h3 className="text-xl font-orbitron font-bold flex items-center gap-3">
-                                <Lightbulb className="text-yellow-400" /> AI IDEA ENGINE
-                            </h3>
-                            <button 
-                                onClick={handleFetchSuggestions}
-                                disabled={loadingSuggestions}
-                                className="relative px-4 py-2 rounded-xl bg-yellow-500/10 text-yellow-500 font-orbitron font-bold text-[10px] border border-yellow-500/30 hover:bg-yellow-500 hover:text-black transition-all flex items-center gap-2 min-w-[150px] justify-center"
-                            >
-                                {loadingSuggestions ? <QuantumSpinner size="sm" color="white" /> : "GENERATE IDEAS"}
-                            </button>
+                            <h3 className="text-xl font-orbitron font-bold flex items-center gap-3"><Lightbulb className="text-yellow-400" /> AI IDEA ENGINE</h3>
+                            <button onClick={handleFetchSuggestions} disabled={loadingSuggestions} className="relative px-4 py-2 rounded-xl bg-yellow-500/10 text-yellow-500 font-orbitron font-bold text-[10px] border border-yellow-500/30 hover:bg-yellow-500 hover:text-black transition-all flex items-center gap-2 min-w-[150px] justify-center">{loadingSuggestions ? <QuantumSpinner size="sm" color="white" /> : "GENERATE IDEAS"}</button>
                         </div>
                         <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                            {aiSuggestions.length === 0 ? (
-                                <p className="text-center py-12 text-slate-500 text-xs font-orbitron uppercase">NO IDEAS SYNTHESIZED</p>
-                            ) : (
-                                aiSuggestions.map((idea, i) => (
-                                    <div key={i} className="p-4 rounded-2xl bg-white/5 border border-white/5 hover:border-yellow-500/30 transition-all">
-                                        <h4 className="font-bold text-sm text-yellow-100 mb-1">{idea.potentialTitle}</h4>
-                                        <p className="text-[10px] text-slate-500 mb-3">{idea.reason}</p>
-                                        <div className="flex justify-between items-center">
-                                            <span className="px-2 py-0.5 rounded-lg bg-yellow-500/10 text-[8px] font-orbitron font-black text-yellow-500 uppercase">{idea.topic}</span>
-                                            <button 
-                                              onClick={() => {
-                                                setEditingPost({
-                                                  title: { en: idea.potentialTitle, bn: '', ar: '' },
-                                                  summary: { en: idea.reason, bn: '', ar: '' },
-                                                  content: { en: '', bn: '', ar: '' },
-                                                  category: idea.topic,
-                                                  seo: { title: idea.potentialTitle, description: idea.reason, keywords: [], robots: 'index, follow' }
-                                                } as any);
-                                                setIsEditorOpen(true);
-                                              }}
-                                              className="text-[8px] font-orbitron font-black text-cyan-400 hover:text-white uppercase flex items-center gap-1"
-                                            >
-                                                DRAFT POST <ArrowRight className="w-2 h-2" />
-                                            </button>
-                                        </div>
+                            {aiSuggestions.length === 0 ? <p className="text-center py-12 text-slate-500 text-xs font-orbitron uppercase">NO IDEAS SYNTHESIZED</p> : aiSuggestions.map((idea, i) => (
+                                <div key={i} className="p-4 rounded-2xl bg-white/5 border border-white/5 hover:border-yellow-500/30 transition-all">
+                                    <h4 className="font-bold text-sm text-yellow-100 mb-1">{idea.potentialTitle}</h4>
+                                    <p className="text-[10px] text-slate-500 mb-3">{idea.reason}</p>
+                                    <div className="flex justify-between items-center">
+                                        <span className="px-2 py-0.5 rounded-lg bg-yellow-500/10 text-[8px] font-orbitron font-black text-yellow-500 uppercase">{idea.topic}</span>
+                                        <button onClick={() => { setEditingPost({ title: { en: idea.potentialTitle, bn: '', ar: '' }, summary: { en: idea.reason, bn: '', ar: '' }, content: { en: '', bn: '', ar: '' }, category: idea.topic, seo: { title: idea.potentialTitle, description: idea.reason, keywords: [], robots: 'index, follow' } } as any); setIsEditorOpen(true); }} className="text-[8px] font-orbitron font-black text-cyan-400 hover:text-white uppercase flex items-center gap-1">DRAFT POST <ArrowRight className="w-2 h-2" /></button>
                                     </div>
-                                ))
-                            )}
+                                </div>
+                            ))}
                         </div>
                     </div>
                 </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  <div className="glass-panel p-8 rounded-[2rem] reveal-item" style={{ animationDelay: '0.4s' }}>
-                      <h3 className="text-xl font-orbitron font-bold mb-8 flex items-center gap-3"><UserPlus className="text-blue-400" /> TEAM MANAGEMENT</h3>
-                      <div className="space-y-4">
-                          {users.map(u => (
-                              <div key={u.id} className="flex items-center justify-between p-4 rounded-xl bg-white/5 border border-white/10">
-                                  <div className="flex items-center gap-3">
-                                      <img src={u.avatar} className="w-10 h-10 rounded-full border border-white/10" alt="" />
-                                      <div>
-                                          <p className="font-bold text-sm">{u.name}</p>
-                                          <p className="text-[10px] text-slate-500 font-orbitron uppercase">{u.role}</p>
-                                      </div>
-                                  </div>
-                                  {u.id !== 'super-admin' && <button onClick={() => deleteUser(u.id)} className="text-slate-500 hover:text-red-500 p-2 transition-colors"><Trash2 className="w-4 h-4" /></button>}
-                              </div>
-                          ))}
-                      </div>
-                  </div>
-
-                  <div className="glass-panel p-8 rounded-[2rem] reveal-item" style={{ animationDelay: '0.5s' }}>
-                      <h3 className="text-xl font-orbitron font-bold mb-8 flex items-center gap-3"><MessageSquare className="text-yellow-400" /> MODERATION QUEUE</h3>
-                      <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                          {comments.filter(c => c.status !== 'approved').length === 0 ? (
-                            <div className="py-12 text-center text-slate-500 text-sm font-orbitron uppercase tracking-widest">No pending comments</div>
-                          ) : (
-                            comments.filter(c => c.status !== 'approved').map(comment => (
-                              <div key={comment.id} className="p-4 rounded-xl bg-white/5 border border-white/5 space-y-3">
-                                  <div className="flex justify-between items-start">
-                                      <div className="flex items-center gap-2">
-                                          <span className="text-xs font-bold">{comment.userName}</span>
-                                          <span className={`text-[8px] font-orbitron font-black uppercase px-2 py-0.5 rounded ${comment.status === 'pending' ? 'bg-yellow-500/20 text-yellow-500' : 'bg-red-500/20 text-red-500'}`}>
-                                              {comment.status}
-                                          </span>
-                                      </div>
-                                      <span className="text-[8px] text-slate-600">{new Date(comment.date).toLocaleDateString()}</span>
-                                  </div>
-                                  <p className="text-xs text-slate-300 line-clamp-2 italic">"{comment.text}"</p>
-                                  <div className="flex gap-2 pt-2">
-                                      <button 
-                                        onClick={() => handleModeration(comment.id, 'approved')}
-                                        className="flex-1 py-2 rounded-lg bg-green-500/20 text-green-500 hover:bg-green-500 hover:text-white transition-all text-[10px] font-orbitron font-black"
-                                      >
-                                          APPROVE
-                                      </button>
-                                      <button 
-                                        onClick={() => handleModeration(comment.id, 'rejected')}
-                                        className="flex-1 py-2 rounded-lg bg-red-500/20 text-red-500 hover:bg-red-500 hover:text-white transition-all text-[10px] font-orbitron font-black"
-                                      >
-                                          REJECT
-                                      </button>
-                                      <button 
-                                        onClick={() => handleModeration(comment.id, 'delete')}
-                                        className="p-2 rounded-lg bg-white/5 text-slate-500 hover:text-white hover:bg-zinc-800 transition-all"
-                                      >
-                                          <Trash2 className="w-4 h-4" />
-                                      </button>
-                                  </div>
-                              </div>
-                            ))
-                          )}
-                      </div>
-                  </div>
-                </div>
-
-                {/* Edit Existing Posts Table */}
-                <div className="glass-panel p-8 rounded-[3rem] border border-white/5 reveal-item" style={{ animationDelay: '0.6s' }}>
-                    <h3 className="text-2xl font-orbitron font-black mb-8 flex items-center gap-3"><List className="text-cyan-400" /> TRANSMISSION LOG</h3>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left">
-                            <thead className="border-b border-white/10 text-[10px] font-orbitron font-black text-slate-500 uppercase tracking-widest">
-                                <tr>
-                                    <th className="pb-4">TITLE</th>
-                                    <th className="pb-4">CATEGORY</th>
-                                    <th className="pb-4">VIEWS</th>
-                                    <th className="pb-4 text-right">ACTIONS</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-white/5">
-                                {posts.map(post => (
-                                    <tr key={post.id} className="group">
-                                        <td className="py-4 font-bold text-sm text-slate-300 group-hover:text-white transition-colors">{post.title[lang]}</td>
-                                        <td className="py-4 text-xs text-slate-500 font-orbitron uppercase">{post.category}</td>
-                                        <td className="py-4 text-xs text-slate-500 font-orbitron">{post.views}</td>
-                                        <td className="py-4 text-right">
-                                            <div className="flex justify-end gap-2">
-                                                <button 
-                                                  onClick={() => { setEditingPost(post); setIsEditorOpen(true); }}
-                                                  className="p-2 rounded-lg bg-white/5 text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/10 transition-all"
-                                                >
-                                                  <Edit3 className="w-4 h-4" />
-                                                </button>
-                                                <button 
-                                                  onClick={() => deletePost(post.id)}
-                                                  className="p-2 rounded-lg bg-white/5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
-                                                >
-                                                  <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                {isEditorOpen && (
-                  <PostEditor 
-                    lang={lang}
-                    initialPost={editingPost || undefined}
-                    onSave={(post) => {
-                      if (editingPost) {
-                        deletePost(editingPost.id);
-                        addPost(post);
-                      } else {
-                        addPost(post);
-                      }
-                      setIsEditorOpen(false);
-                      setEditingPost(null);
-                    } }
-                    onCancel={() => { setIsEditorOpen(false); setEditingPost(null); }}
-                  />
-                )}
+                {isEditorOpen && <PostEditor lang={lang} initialPost={editingPost || undefined} onSave={(post) => { if (editingPost) { deletePost(editingPost.id); addPost(post); } else { addPost(post); } setIsEditorOpen(false); setEditingPost(null); }} onCancel={() => { setIsEditorOpen(false); setEditingPost(null); }} />}
             </div>
         );
       case 'profile':
@@ -734,95 +549,18 @@ const App: React.FC = () => {
                     <img src={currentUser.avatar} className="w-32 h-32 md:w-48 md:h-48 rounded-full mx-auto mb-8 border-4 border-cyan-500 shadow-2xl" alt={currentUser.name} />
                     <h1 className="text-4xl md:text-6xl font-orbitron font-black mb-2">{currentUser.name}</h1>
                     <p className="text-cyan-400 font-orbitron text-xs md:text-sm uppercase tracking-widest mb-8">{currentUser.role}</p>
-                    <div className="flex justify-center flex-wrap gap-4">
-                        <button className="px-6 py-2 md:px-10 md:py-3 rounded-xl bg-white/5 border border-white/10 text-[10px] font-orbitron font-bold uppercase tracking-widest hover:bg-cyan-500 hover:text-black transition-all">Edit Bio</button>
-                        <button className="px-6 py-2 md:px-10 md:py-3 rounded-xl bg-white/5 border border-white/10 text-[10px] font-orbitron font-bold uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all">Settings</button>
-                    </div>
                 </header>
-
-                <section className="glass-panel p-8 rounded-[2.5rem] mb-12 reveal-item" style={{ animationDelay: '0.1s' }} aria-label="Subscription Settings">
-                    <h2 className="text-xl font-orbitron font-bold flex items-center gap-3 mb-6">
-                        <Bell className="text-cyan-400" /> SUBSCRIPTION HUB
-                    </h2>
+                <section className="glass-panel p-8 rounded-[2.5rem] mb-12 reveal-item">
+                    <h2 className="text-xl font-orbitron font-bold flex items-center gap-3 mb-6"><Bell className="text-cyan-400" /> SUBSCRIPTION HUB</h2>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         {['Daily Digest', 'AI Trends', 'New Comments'].map(topic => (
                             <div key={topic} className="flex items-center justify-between p-4 rounded-xl bg-white/5 border border-white/5">
                                 <span className="text-sm font-bold">{topic}</span>
-                                <button 
-                                    onClick={() => {
-                                        const currentSubs = currentUser.subscriptions || [];
-                                        const newSubs = currentSubs.includes(topic) 
-                                            ? currentSubs.filter(s => s !== topic)
-                                            : [...currentSubs, topic];
-                                        setCurrentUser({...currentUser, subscriptions: newSubs});
-                                    }}
-                                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                                        (currentUser.subscriptions || []).includes(topic) 
-                                        ? 'bg-cyan-500 text-black shadow-[0_0_10px_#00f3ff]' 
-                                        : 'bg-white/5 text-slate-500'
-                                    }`}
-                                    aria-label={`Toggle subscription for ${topic}`}
-                                >
-                                    {(currentUser.subscriptions || []).includes(topic) ? <Check className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
-                                </button>
+                                <button onClick={() => { const currentSubs = currentUser.subscriptions || []; const newSubs = currentSubs.includes(topic) ? currentSubs.filter(s => s !== topic) : [...currentSubs, topic]; setCurrentUser({...currentUser, subscriptions: newSubs}); }} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${(currentUser.subscriptions || []).includes(topic) ? 'bg-cyan-500 text-black shadow-[0_0_10px_#00f3ff]' : 'bg-white/5 text-slate-500'}`}>{ (currentUser.subscriptions || []).includes(topic) ? <Check className="w-5 h-5" /> : <Plus className="w-5 h-5" /> }</button>
                             </div>
                         ))}
                     </div>
                 </section>
-
-                <div className="space-y-8">
-                  <div className="flex items-center justify-between reveal-item" style={{ animationDelay: '0.2s' }}>
-                    <h2 className="text-2xl md:text-4xl font-orbitron font-bold flex items-center gap-3">
-                        <History className="text-cyan-400" /> READING HISTORY
-                    </h2>
-                    <span className="text-[10px] font-orbitron text-slate-500 uppercase tracking-widest">Last 12 Items</span>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-6">
-                    {currentUser.history && currentUser.history.length > 0 ? (
-                      currentUser.history.map((item, idx) => {
-                        const post = posts.find(p => p.id === item.postId);
-                        if (!post) return null;
-                        return (
-                          <div 
-                            key={`${item.postId}-${idx}`}
-                            onClick={() => handlePostClick(post)}
-                            className="glass-panel p-6 rounded-[2.5rem] flex flex-col sm:flex-row items-center gap-6 cursor-pointer hover:border-cyan-500/40 hover:bg-white/5 transition-all group reveal-item"
-                            style={{ animationDelay: `${idx * 0.05 + 0.3}s` }}
-                          >
-                            <div className="w-full sm:w-32 h-32 rounded-3xl overflow-hidden border border-white/10 shrink-0">
-                              <img src={post.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform" alt="" />
-                            </div>
-                            <div className="flex-1 text-center sm:text-left">
-                              <h4 className="text-xl md:text-2xl font-bold group-hover:text-cyan-400 transition-colors line-clamp-1">{post.title[lang]}</h4>
-                              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 mt-3">
-                                <div className="flex items-center justify-center sm:justify-start gap-1.5 text-[10px] font-orbitron text-slate-500 font-bold uppercase tracking-widest">
-                                  <Eye className="w-3.5 h-3.5 text-cyan-400" />
-                                  <span className="text-cyan-500/80">Last Read:</span>
-                                </div>
-                                <span className="text-[10px] md:text-xs font-orbitron text-slate-400 tracking-widest font-medium">
-                                  {new Date(item.viewedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
-                                  <span className="mx-2 text-slate-700">|</span>
-                                  {new Date(item.viewedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="hidden sm:flex w-12 h-12 rounded-full border border-white/10 items-center justify-center text-slate-600 group-hover:border-cyan-500 group-hover:text-cyan-400 group-hover:translate-x-1 transition-all">
-                              <ArrowRight className="w-6 h-6" />
-                            </div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className="py-24 text-center glass-panel rounded-[3rem] border-dashed border-white/10 reveal-item" style={{ animationDelay: '0.4s' }}>
-                        <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-6">
-                           <Clock className="w-10 h-10 text-slate-600" />
-                        </div>
-                        <p className="text-slate-500 font-orbitron text-xs uppercase tracking-widest">No transmissions recorded in history log</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
             </div>
         );
       case 'post-detail': return renderPostDetail();
@@ -830,35 +568,38 @@ const App: React.FC = () => {
         <div className="min-h-[80vh] flex items-center justify-center px-[5vw]">
             <div className="w-full max-w-md glass-panel p-10 rounded-[3rem] border border-white/10 reveal-item">
                 <header className="text-center mb-10">
-                    <Key className="w-12 h-12 text-cyan-400 mx-auto mb-6" />
-                    <h2 className="text-2xl font-orbitron font-bold">Secure Access</h2>
+                    {isSignUp ? <UserPlus className="w-12 h-12 text-magenta-400 mx-auto mb-6" /> : <Key className="w-12 h-12 text-cyan-400 mx-auto mb-6" />}
+                    <h2 className="text-2xl font-orbitron font-bold tracking-tight">{isSignUp ? 'New Account Protocol' : 'Secure Access'}</h2>
                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-2">Firebase Auth Protocol Active</p>
                 </header>
                 {isAuthLoading ? (
                   <div className="flex flex-col items-center justify-center py-12 gap-6">
-                    <QuantumSpinner size="lg" color="cyan" />
-                    <p className="text-[10px] font-orbitron font-black text-cyan-500 animate-pulse tracking-[0.2em] uppercase">Authenticating Transmission...</p>
+                    <QuantumSpinner size="lg" color={isSignUp ? "magenta" : "cyan"} />
+                    <p className="text-[10px] font-orbitron font-black text-cyan-500 animate-pulse tracking-[0.2em] uppercase">Synchronizing...</p>
                   </div>
                 ) : (
-                  <form onSubmit={handleLogin} className="space-y-6">
+                  <form onSubmit={handleAuthAction} className="space-y-6">
+                      {isSignUp && (
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-orbitron font-black text-slate-500 uppercase tracking-widest px-2">Display Name</label>
+                          <input type="text" placeholder="Quantum Explorer" required value={displayName} onChange={e => setDisplayName(e.target.value)} className="w-full bg-black/40 p-4 rounded-2xl border border-white/10 focus:border-magenta-500/50 focus:outline-none transition-colors text-white" />
+                        </div>
+                      )}
                       <div className="space-y-2">
                         <label className="text-[10px] font-orbitron font-black text-slate-500 uppercase tracking-widest px-2">Email Address</label>
-                        <input 
-                          type="email" placeholder="raihankhanpro@gmail.com" required 
-                          value={email} onChange={e => setEmail(e.target.value)}
-                          className="w-full bg-black/40 p-4 rounded-2xl border border-white/10 focus:border-cyan-500/50 focus:outline-none transition-colors text-white"
-                        />
+                        <input type="email" placeholder="raihankhanpro@gmail.com" required value={email} onChange={e => setEmail(e.target.value)} className={`w-full bg-black/40 p-4 rounded-2xl border border-white/10 ${isSignUp ? 'focus:border-magenta-500/50' : 'focus:border-cyan-500/50'} focus:outline-none transition-colors text-white`} />
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] font-orbitron font-black text-slate-500 uppercase tracking-widest px-2">Security Key</label>
-                        <input 
-                          type="password" placeholder="••••••••" required 
-                          value={password} onChange={e => setPassword(e.target.value)}
-                          className="w-full bg-black/40 p-4 rounded-2xl border border-white/10 focus:border-cyan-500/50 focus:outline-none transition-colors text-white"
-                        />
+                        <input type="password" placeholder="••••••••" required value={password} onChange={e => setPassword(e.target.value)} className={`w-full bg-black/40 p-4 rounded-2xl border border-white/10 ${isSignUp ? 'focus:border-magenta-500/50' : 'focus:border-cyan-500/50'} focus:outline-none transition-colors text-white`} />
                       </div>
                       {authError && <p className="text-xs text-red-500 text-center font-bold uppercase tracking-tighter bg-red-500/10 p-3 rounded-xl border border-red-500/20">{authError}</p>}
-                      <button className="w-full py-5 rounded-2xl bg-cyan-500 text-black font-orbitron font-black uppercase tracking-widest hover:scale-105 transition-all shadow-[0_0_20px_rgba(0,243,255,0.4)] active:scale-95">Initialize Access</button>
+                      <button className={`w-full py-5 rounded-2xl ${isSignUp ? 'bg-magenta-500 shadow-[0_0_20px_rgba(255,0,255,0.4)]' : 'bg-cyan-500 shadow-[0_0_20px_rgba(0,243,255,0.4)]'} text-black font-orbitron font-black uppercase tracking-widest hover:scale-105 transition-all active:scale-95`}>{isSignUp ? 'REGISTER ID' : 'INITIALIZE ACCESS'}</button>
+                      <div className="pt-4 text-center">
+                        <button type="button" onClick={() => { setIsSignUp(!isSignUp); setAuthError(''); }} className="text-[10px] font-orbitron font-black uppercase tracking-widest text-slate-500 hover:text-white transition-colors">
+                          {isSignUp ? 'Already have credentials? Access Terminal' : 'No account? Register New Identity'}
+                        </button>
+                      </div>
                   </form>
                 )}
             </div>
@@ -870,34 +611,14 @@ const App: React.FC = () => {
 
   return (
     <div className={`min-h-screen text-slate-100 selection:bg-cyan-500 selection:text-black ${lang === 'ar' ? 'rtl' : 'ltr'}`}>
-      <Navbar 
-        lang={lang} 
-        setLang={setLang} 
-        user={currentUser} 
-        currentPath={path} 
-        setPath={setPath}
-        onLogout={handleLogout}
-        config={siteConfig}
-      />
-      
-      <main id="main-content" className="relative z-10 pt-16 overflow-x-hidden min-h-screen">
-        {renderContent()}
-      </main>
-
-      <AIChatbot />
-      <ScrollToTop />
-      
+      <Navbar lang={lang} setLang={setLang} user={currentUser} currentPath={path} setPath={setPath} onLogout={handleLogout} config={siteConfig} />
+      <main id="main-content" className="relative z-10 pt-16 overflow-x-hidden min-h-screen">{renderContent()}</main>
+      <AIChatbot /><ScrollToTop />
       <footer className="relative z-10 border-t border-white/10 py-24 glass-panel mt-24">
         <div className="max-w-[1600px] mx-auto px-[5vw] text-center">
-            <div className="font-orbitron font-black text-3xl md:text-5xl mb-8 tracking-tighter reveal-item">
-                RAIHAN KHAN <span className="neon-text-cyan">ONLINE</span>
-            </div>
-            <nav className="flex justify-center flex-wrap gap-8 mb-16 reveal-item" style={{ animationDelay: '0.1s' }} aria-label="Social media links">
-                {SOCIAL_HANDLES.map(s => (
-                    <a key={s.name} href={s.url} target="_blank" rel="noreferrer" className="text-slate-500 hover:text-white transition-colors uppercase font-orbitron text-[10px] md:text-xs font-bold tracking-[0.2em]">{s.name}</a>
-                ))}
-            </nav>
-            <p className="text-[10px] text-slate-600 font-orbitron tracking-[0.4em] uppercase reveal-item" style={{ animationDelay: '0.2s' }}>© 2025 ALL RIGHTS RESERVED • ENGINEERED BY RAIHAN KHAN • V5.0 GEMINI INTELLIGENCE</p>
+            <div className="font-orbitron font-black text-3xl md:text-5xl mb-8 tracking-tighter reveal-item">RAIHAN KHAN <span className="neon-text-cyan">ONLINE</span></div>
+            <nav className="flex justify-center flex-wrap gap-8 mb-16 reveal-item">{SOCIAL_HANDLES.map(s => (<a key={s.name} href={s.url} target="_blank" rel="noreferrer" className="text-slate-500 hover:text-white transition-colors uppercase font-orbitron text-[10px] md:text-xs font-bold tracking-[0.2em]">{s.name}</a>))}</nav>
+            <p className="text-[10px] text-slate-600 font-orbitron tracking-[0.4em] uppercase reveal-item">© 2025 ALL RIGHTS RESERVED • ENGINEERED BY RAIHAN KHAN • V5.0 GEMINI INTELLIGENCE</p>
         </div>
       </footer>
     </div>

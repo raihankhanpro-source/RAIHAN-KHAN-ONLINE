@@ -67,6 +67,7 @@ export interface User {
   interests: string[];
   history: UserHistoryItem[];
   subscriptions: string[];
+  likedPosts: string[];
 }
 
 export interface HelpItem {
