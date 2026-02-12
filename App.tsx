@@ -67,9 +67,20 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const matchedUser = users.find(u => u.email === firebaseUser.email);
+        
+        // Safety check for disabled users
+        if (matchedUser && matchedUser.status === 'disabled') {
+          await signOut(auth);
+          setAuthError('CRITICAL: Neural signal rejected. This identity has been decommissioned by the administrator.');
+          setPath('login');
+          setCurrentUser(null);
+          setIsAuthLoading(false);
+          return;
+        }
+
         if (matchedUser) {
           setCurrentUser({
             ...matchedUser,
@@ -83,6 +94,7 @@ const App: React.FC = () => {
             email: firebaseUser.email || '',
             avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
             role: firebaseUser.email === 'raihankhanpro@gmail.com' ? 'admin' : 'user',
+            status: 'active',
             interests: [],
             history: [],
             subscriptions: [],

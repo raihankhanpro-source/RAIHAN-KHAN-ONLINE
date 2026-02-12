@@ -10,7 +10,7 @@ const DEFAULT_CONFIG: SiteConfig = {
   neonColor: '#00f3ff',
   navItems: [
     { id: '1', name: { en: 'Home', bn: 'হোম', ar: 'الرئيسية' }, path: 'home', isCustom: false },
-    { id: '2', name: { en: 'Saudi Helper', bn: 'সৌদি হেল্পার', ar: 'মساعد السعودية' }, path: 'saudi-helper', isCustom: false },
+    { id: '2', name: { en: 'Saudi Helper', bn: 'সৌদি হেল্পার', ar: 'مساعد السعودية' }, path: 'saudi-helper', isCustom: false },
     { id: '3', name: { en: 'AI Tools', bn: 'সেরা এআই টুলস', ar: 'أদوات الذকاء الاصطناعي' }, path: 'ai-tools', isCustom: false },
     { id: '4', name: { en: 'AI News', bn: 'এআই নিউজ', ar: 'أخبار الذকاء الاصطناعي' }, path: 'news', isCustom: false }
   ]
@@ -22,6 +22,7 @@ const INITIAL_USER: User = {
   email: 'raihankhanpro@gmail.com',
   avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Raihan',
   role: 'admin',
+  status: 'active',
   interests: ['AI', 'Tech'],
   history: [],
   subscriptions: [],
@@ -73,7 +74,7 @@ export function useStore() {
   const updatePost = (post: Post) => setPosts(prev => prev.map(p => p.id === post.id ? post : p));
   const deletePost = (id: string) => setPosts(prev => prev.filter(p => p.id !== id));
   
-  const addUser = (user: User) => setUsers(prev => [...prev, user]);
+  const addUser = (user: User) => setUsers(prev => [...prev, { ...user, status: user.status || 'active' }]);
   const updateUser = (user: User) => setUsers(prev => prev.map(u => u.id === user.id ? user : u));
   const deleteUser = (id: string) => setUsers(prev => prev.filter(u => u.id !== id));
 

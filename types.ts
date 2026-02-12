@@ -63,6 +63,7 @@ export interface User {
   email: string;
   avatar: string;
   role: 'admin' | 'editor' | 'user';
+  status?: 'active' | 'disabled';
   bio?: string;
   interests: string[];
   history: UserHistoryItem[];
