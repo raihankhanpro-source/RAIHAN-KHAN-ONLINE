@@ -37,14 +37,26 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({
       return;
     }
     const newStatus = user.status === 'disabled' ? 'active' : 'disabled';
-    onUpdateUser({ ...user, status: newStatus });
+    
+    const confirmMessage = user.status === 'disabled' 
+      ? `NEURAL REACTIVATION: Restore unit ${user.name} to operational status? Their quantum signature will rejoin the network.`
+      : `NEURAL DEACTIVATION: Sever connection to unit ${user.name}? Their access to the mainframe will be terminated immediately.`;
+    
+    if (confirm(confirmMessage)) {
+      onUpdateUser({ ...user, status: newStatus });
+    }
   };
 
   const handleDelete = (id: string) => {
     if (id === currentUser?.id) {
       return;
     }
-    if (confirm("DANGER: This action will permanently decommission this neural identity from the mainframe. Proceed?")) {
+    const user = users.find(u => u.id === id);
+    const confirmMessage = user 
+      ? `CRITICAL: Permanently decommission neural identity "${user.name}" (${user.email})? This action cannot be reversed and all quantum signatures will be purged from the mainframe.`
+      : "DANGER: This action will permanently decommission this neural identity from the mainframe. Proceed?";
+    
+    if (confirm(confirmMessage)) {
       onDeleteUser(id);
     }
   };

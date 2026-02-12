@@ -3,13 +3,13 @@ import { getAuth } from "firebase/auth";
 import { getAnalytics, isSupported } from "firebase/analytics";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyB6QrrScG4VFrSXSTjS4ti-5XlJrtiTA9o",
-  authDomain: "raihan-khan-online.firebaseapp.com",
-  projectId: "raihan-khan-online",
-  storageBucket: "raihan-khan-online.firebasestorage.app",
-  messagingSenderId: "239559233238",
-  appId: "1:239559233238:web:b69460ce42cb55e7bbc377",
-  measurementId: "G-D08YHWGQPX"
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyB6QrrScG4VFrSXSTjS4ti-5XlJrtiTA9o",
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "raihan-khan-online.firebaseapp.com",
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "raihan-khan-online",
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "raihan-khan-online.firebasestorage.app",
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "239559233238",
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:239559233238:web:b69460ce42cb55e7bbc377",
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || "G-D08YHWGQPX"
 };
 
 const app = initializeApp(firebaseConfig);
