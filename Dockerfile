@@ -19,5 +19,5 @@ RUN npm run build
 # Expose port (Cloud Run will set PORT env var)
 EXPOSE 8080
 
-# Start the application - Cloud Run sets PORT env var to 8080
-CMD ["sh", "-c", "npm run preview -- --port $PORT --host 0.0.0.0"]
+# Start the Express server
+CMD ["npm", "start"]
