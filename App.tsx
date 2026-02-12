@@ -14,6 +14,8 @@ import ScrollToTop from './components/ScrollToTop';
 import QuantumSpinner from './components/QuantumSpinner';
 import PostEditor from './components/PostEditor';
 import { analyzeCommentSentiment, getAIContentSuggestions } from './services/gemini';
+import { auth } from './services/firebase';
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { 
   Plus, Edit3, Trash2, ChevronUp, ChevronDown, 
   BarChart3, Settings, List, BrainCircuit, User as UserIcon,
@@ -43,12 +45,44 @@ const App: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
 
   const t = TRANSLATIONS[lang];
+
+  // --- FIREBASE AUTH SYNC ---
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        // Sync firebase user with our internal user model
+        const matchedUser = users.find(u => u.email === firebaseUser.email);
+        if (matchedUser) {
+          setCurrentUser(matchedUser);
+        } else {
+          // If no match found in our static/local users list, create a basic user object
+          const newUser: User = {
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Unknown User',
+            email: firebaseUser.email || '',
+            avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
+            role: 'user',
+            interests: [],
+            history: [],
+            subscriptions: []
+          };
+          setCurrentUser(newUser);
+        }
+      } else {
+        setCurrentUser(null);
+      }
+      setIsAuthLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [users, setCurrentUser]);
 
   // --- ENHANCED SEO & METADATA MANAGEMENT ---
   useEffect(() => {
@@ -154,20 +188,28 @@ const App: React.FC = () => {
     setLoadingSuggestions(false);
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (email === 'raihankhanpro@gmail.com' && password === 'Ayat@007@007') {
-        const adminUser = users.find(u => u.email === email) || users[0];
-        setCurrentUser(adminUser);
-        setPath('home');
-    } else {
-        const userMatch = users.find(u => u.email === email);
-        if (userMatch) {
-            setCurrentUser(userMatch);
-            setPath('home');
-        } else {
-            setAuthError('Unauthorized access denied.');
-        }
+    setAuthError('');
+    setIsAuthLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      setPath('home');
+      setEmail('');
+      setPassword('');
+    } catch (error: any) {
+      console.error("Auth Error:", error);
+      setAuthError('Authentication failed. Check your credentials.');
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setPath('home');
+    } catch (error) {
+      console.error("Logout Error:", error);
     }
   };
 
@@ -671,7 +713,6 @@ const App: React.FC = () => {
                     initialPost={editingPost || undefined}
                     onSave={(post) => {
                       if (editingPost) {
-                        // Logic for update in useStore if needed, or just add logic here
                         deletePost(editingPost.id);
                         addPost(post);
                       } else {
@@ -787,25 +828,39 @@ const App: React.FC = () => {
       case 'post-detail': return renderPostDetail();
       case 'login': return (
         <div className="min-h-[80vh] flex items-center justify-center px-[5vw]">
-            <div className="w-full max-md glass-panel p-10 rounded-[3rem] border border-white/10 reveal-item">
+            <div className="w-full max-w-md glass-panel p-10 rounded-[3rem] border border-white/10 reveal-item">
                 <header className="text-center mb-10">
                     <Key className="w-12 h-12 text-cyan-400 mx-auto mb-6" />
                     <h2 className="text-2xl font-orbitron font-bold">Secure Access</h2>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-2">Firebase Auth Protocol Active</p>
                 </header>
-                <form onSubmit={handleLogin} className="space-y-6">
-                    <input 
-                      type="email" placeholder="Email" required 
-                      value={email} onChange={e => setEmail(e.target.value)}
-                      className="w-full bg-white/5 p-4 rounded-2xl border border-white/10 focus:border-cyan-500/50 focus:outline-none"
-                    />
-                    <input 
-                      type="password" placeholder="Password" required 
-                      value={password} onChange={e => setPassword(e.target.value)}
-                      className="w-full bg-white/5 p-4 rounded-2xl border border-white/10 focus:border-cyan-500/50 focus:outline-none"
-                    />
-                    {authError && <p className="text-xs text-red-500 text-center font-bold uppercase">{authError}</p>}
-                    <button className="w-full py-4 rounded-2xl bg-cyan-500 text-black font-orbitron font-black uppercase tracking-widest hover:scale-105 transition-all shadow-[0_0_20px_rgba(0,243,255,0.4)]">Initialize Access</button>
-                </form>
+                {isAuthLoading ? (
+                  <div className="flex flex-col items-center justify-center py-12 gap-6">
+                    <QuantumSpinner size="lg" color="cyan" />
+                    <p className="text-[10px] font-orbitron font-black text-cyan-500 animate-pulse tracking-[0.2em] uppercase">Authenticating Transmission...</p>
+                  </div>
+                ) : (
+                  <form onSubmit={handleLogin} className="space-y-6">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-orbitron font-black text-slate-500 uppercase tracking-widest px-2">Email Address</label>
+                        <input 
+                          type="email" placeholder="raihankhanpro@gmail.com" required 
+                          value={email} onChange={e => setEmail(e.target.value)}
+                          className="w-full bg-black/40 p-4 rounded-2xl border border-white/10 focus:border-cyan-500/50 focus:outline-none transition-colors text-white"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-orbitron font-black text-slate-500 uppercase tracking-widest px-2">Security Key</label>
+                        <input 
+                          type="password" placeholder="••••••••" required 
+                          value={password} onChange={e => setPassword(e.target.value)}
+                          className="w-full bg-black/40 p-4 rounded-2xl border border-white/10 focus:border-cyan-500/50 focus:outline-none transition-colors text-white"
+                        />
+                      </div>
+                      {authError && <p className="text-xs text-red-500 text-center font-bold uppercase tracking-tighter bg-red-500/10 p-3 rounded-xl border border-red-500/20">{authError}</p>}
+                      <button className="w-full py-5 rounded-2xl bg-cyan-500 text-black font-orbitron font-black uppercase tracking-widest hover:scale-105 transition-all shadow-[0_0_20px_rgba(0,243,255,0.4)] active:scale-95">Initialize Access</button>
+                  </form>
+                )}
             </div>
         </div>
       );
@@ -821,7 +876,7 @@ const App: React.FC = () => {
         user={currentUser} 
         currentPath={path} 
         setPath={setPath}
-        onLogout={() => setCurrentUser(null)}
+        onLogout={handleLogout}
         config={siteConfig}
       />
       
